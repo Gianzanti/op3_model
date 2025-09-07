@@ -1,0 +1,27 @@
+[project]
+name = "op3"
+version = "0.1.4"
+description = "Darwin OP3 Gym MuJoCo Environment"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [ "gymnasium>=1.2.0", "imageio>=2.37.0", "mujoco>=3.3.5",]
+[[project.authors]]
+name = "Fabio Gianzanti"
+email = "pardal@hotmail.com"
+
+[build-system]
+requires = [ "uv_build>=0.8.14,<0.9.0",]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [ "pre-commit>=4.3.0", "pytest>=8.4.2", "semver>=3.0.4", "toml>=0.10.2",]
+
+[tool.ruff]
+line-length = 88
+exclude = [ "tests/*",]
+
+[tool.ruff.lint]
+select = [ "E", "F", "B", "UP", "C90", "RUF",]
+
+[tool.setuptools.packages.find]
+where = [ "src",]
