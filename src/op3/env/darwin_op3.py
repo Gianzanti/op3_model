@@ -28,8 +28,8 @@ information = {
     "r_forward": "rf",
     "r_knee_flex": "rkf",
     "r_feet_up": "rfu",
-    "r_parallel": "rpr",
-    "p_control": "cc",
+    "p_not_parallel": "pnp",
+    "p_control": "pc",
 }
 
 
@@ -54,7 +54,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         reach_target_reward: float = 100.0,
         knee_flex_reward: float = 1e-3,
         feet_up_reward: float = 1e-3,
-        parallel_reward: float = 0.5,
+        not_parallel_penalty: float = 0.05,
         motor_max_torque: float = 3.0,
         reset_noise_scale: float = 1e-2,
         **kwargs,
@@ -71,7 +71,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             reach_target_reward,
             knee_flex_reward,
             feet_up_reward,
-            parallel_reward,
+            not_parallel_penalty,
             motor_max_torque,
             reset_noise_scale,
             **kwargs,
@@ -89,7 +89,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         self._reach_target_reward: float = reach_target_reward
         self._knee_flex_reward: float = knee_flex_reward
         self._feet_up_reward: float = feet_up_reward
-        self._parallel_reward: float = parallel_reward
+        self._not_parallel_penalty: float = not_parallel_penalty
         self._motor_max_torque = motor_max_torque
         self._reset_noise_scale: float = reset_noise_scale
 
@@ -163,14 +163,16 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         feet_up_reward = self._feet_up_reward * (
             self.data.geom_xpos[32][2] + self.data.geom_xpos[44][2]
         )
-        parallel_reward = self._parallel_reward * self.check_parallel_reward()
+        not_parallel_penalty = (
+            self._not_parallel_penalty * self.check_not_parallel_penalty()
+        )
 
         reward = (
             health_reward
             + forward_reward
             + knee_flex_reward
             + feet_up_reward
-            + parallel_reward
+            - not_parallel_penalty
             - control_cost
         )
 
@@ -180,7 +182,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             control_cost = 0
             knee_flex_reward = 0
             feet_up_reward = 0
-            parallel_reward = 0
+            not_parallel_penalty = 0
             reward = self._reach_target_reward
 
         reward_info = {
@@ -189,7 +191,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             information["p_control"]: control_cost,
             information["r_knee_flex"]: knee_flex_reward,
             information["r_feet_up"]: feet_up_reward,
-            information["r_parallel"]: parallel_reward,
+            information["p_not_parallel"]: not_parallel_penalty,
         }
 
         return reward, reward_info
@@ -267,38 +269,56 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         # If the loop completes, no contact was found.
         return False
 
-    def check_parallel_reward(self):
+    def check_not_parallel_penalty(self):
         """
-        Calculate a reward based on the orientation of the robot's feet
+        Calculate a penalty based on the orientation of the robot's feet
         when they are in contact with the ground.
 
-        The reward is higher when the feet are more parallel to the ground
-        (i.e., their local Z-axes align with the global Z-axis).
+        The penalty is higher when the feet are less parallel to the ground
+        (i.e., their local Z-axes do not align with the global Z-axis).
 
         Returns:
-            float: The calculated parallel reward.
+            float: The calculated not parallel penalty.
         """
 
         # 1. Get the rotation of the foot bodies
         left_foot_rot = self.data.geom("l_foot").xmat.reshape(3, 3)
+        print("Left foot rotation matrix:\n", left_foot_rot)
         right_foot_rot = self.data.geom("r_foot").xmat.reshape(3, 3)
+        print("Right foot rotation matrix:\n", right_foot_rot)
 
         # 2. Extract their local Z-axes (the "up" vector for each foot)
         left_foot_z_axis = left_foot_rot[:, 2]
+        print("Left foot Z-axis:", left_foot_z_axis)
         right_foot_z_axis = right_foot_rot[:, 2]
+        print("Right foot Z-axis:", right_foot_z_axis)
 
-        # 3. Check for contact with the worldbody (the ground)
-        # Note: 'worldbody' is the default name for the root body in MuJoCo.
+        # 3. Calculate the dot product with the global Z-axis (0, 0, 1)
+        # Measure how aligned the foot's Z-axis is with the global Z-axis
+        # A value of 1 means perfectly aligned (parallel), 0 means perpendicular
+        # The dot product with (0,0,1) is just the z-component of the vector.
+        # So we just get that directly.
+        left_alignment = left_foot_z_axis[2]
+        print("Left alignment:", left_alignment)
+        right_alignment = right_foot_z_axis[2]
+        print("Right alignment:", right_alignment)
+
+        # 4. Check for contact with the world (the ground)
+        # Note: 'world' is the default name for the root body in MuJoCo.
         is_left_foot_on_ground = self._check_contact("l_foot")
         # print("Left foot on ground:", is_left_foot_on_ground)
         is_right_foot_on_ground = self._check_contact("r_foot")
         # print("Right foot on ground:", is_right_foot_on_ground)
 
-        # 4. Calculate the parallel reward only for the foot that is on the ground
-        # The dot product with (0,0,1) is just the z-component of the vector.
-        left_parallel_reward = left_foot_z_axis[2] if is_left_foot_on_ground else 0
-        right_parallel_reward = right_foot_z_axis[2] if is_right_foot_on_ground else 0
+        # 4. Calculate the penalty based on alignment and contact
+        # Only apply the penalty if the foot is in contact with the ground
+        # The penalty is higher when the foot is less aligned (i.e., less parallel)
+        # We use the alignment directly as the reward, so higher is better (more parallel)
+        left_parallel_penalty = (1 - left_alignment) if is_left_foot_on_ground else 0
+        print("Left parallel penalty:", left_parallel_penalty)
+        right_parallel_penalty = (1 - right_alignment) if is_right_foot_on_ground else 0
+        print("Right parallel penalty:", right_parallel_penalty)
 
-        parallel_reward = left_parallel_reward + right_parallel_reward
-        # print(f"Parallel Reward: {parallel_reward}")
-        return parallel_reward
+        not_parallel_penalty = left_parallel_penalty + right_parallel_penalty
+        print(f"Not Parallel Penalty: {not_parallel_penalty}")
+        return not_parallel_penalty
