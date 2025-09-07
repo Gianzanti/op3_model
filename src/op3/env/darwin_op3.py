@@ -17,25 +17,18 @@ def mass_center(model, data):
 
 
 information = {
-    # "_pos_body_x": "pbx",
-    # "_pos_body_y": "pby",
-    # "_pos_body_z": "pbz",
-    "_pos_mc_x": "pmcx",
-    "_pos_mc_y": "pmcy",
-    "_pos_mc_z": "pmcz",
-    # "_vel_body_x": "vbx",
-    # "_vel_body_y": "vby",
-    # "_vel_body_z": "vbz",
-    "_vel_mc_x": "vmcx",
-    "_vel_mc_y": "vmcy",
-    "_vel_mc_z": "vmcz",
-    "orientation": "or",
+    "_pos_x": "px",
+    "_pos_y": "py",
+    "_pos_z": "pz",
+    "_vel_x": "vx",
+    "_vel_y": "vy",
+    "_vel_z": "vz",
     "distance": "dfo",
-    "rwd_health": "rh",
-    "rwd_forward": "rf",
-    "pnl_control": "cc",
-    # 'reward_pos_deviation': 'pos_deviation_cost',
-    # 'reward_lateral_velocity': 'lateral_velocity_cost',
+    "r_health": "rh",
+    "r_forward": "rf",
+    "r_knee_flex": "rkf",
+    "r_feet_up": "rfu",
+    "p_control": "cc",
 }
 
 
@@ -56,10 +49,10 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         keep_alive_reward: float = 1.0,
         ctrl_cost_weight: float = 1e-3,
         target_distance: float = 100.0,
-        forward_velocity_weight: float = 10.0,
+        forward_velocity_weight: float = 3.0,
         reach_target_reward: float = 100.0,
-        # pos_deviation_weight: float = 10.0,  # 5e-2,
-        # lateral_velocity_weight: float = 5.0,  # 5e-2,
+        knee_flex_reward: float = 1e-3,
+        feet_up_reward: float = 1e-3,
         motor_max_torque: float = 3.0,
         reset_noise_scale: float = 1e-2,
         **kwargs,
@@ -74,8 +67,8 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             forward_velocity_weight,
             target_distance,
             reach_target_reward,
-            # pos_deviation_weight,
-            # lateral_velocity_weight,
+            knee_flex_reward,
+            feet_up_reward,
             motor_max_torque,
             reset_noise_scale,
             **kwargs,
@@ -91,8 +84,8 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         self._fw_vel_rew_weight: float = forward_velocity_weight
         self._target_distance: float = target_distance
         self._reach_target_reward: float = reach_target_reward
-        # self._pos_deviation_weight: float = pos_deviation_weight
-        # self._lateral_velocity_weight: float = lateral_velocity_weight
+        self._knee_flex_reward: float = knee_flex_reward
+        self._feet_up_reward: float = feet_up_reward
         self._motor_max_torque = motor_max_torque
         self._reset_noise_scale: float = reset_noise_scale
 
@@ -150,7 +143,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
 
         return self._get_obs()
 
-    @property
+    # @property
     def is_healthy(self, z_pos) -> bool:
         min_z, max_z = self._healthy_z_range
         return min_z < z_pos < max_z
@@ -160,29 +153,35 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         health_reward = self._keep_alive_reward * self.is_healthy(position_after[2])
         control_cost = self._ctrl_cost_weight * np.sum(np.square(self.data.ctrl))
         forward_reward = self._fw_vel_rew_weight * x_velocity
-        # pos_deviation_cost = self._pos_deviation_weight * (self.data.qpos[1] ** 2)
-        # lateral_velocity_cost = self._lateral_velocity_weight * (y_velocity ** 2)
+        knee_flex_reward = self._knee_flex_reward * (
+            abs(self.data.qvel[10]) + abs(self.data.qvel[16])
+        )
+        feet_up_reward = self._feet_up_reward * (
+            self.data.geom_xpos[32][2] + self.data.geom_xpos[44][2]
+        )
 
-        # reward = (
-        #     health_reward + forward_reward + control_cost -
-        #   pos_deviation_cost - lateral_velocity_cost
-        # )
-        reward = health_reward - control_cost + forward_reward
+        reward = (
+            health_reward
+            + forward_reward
+            + knee_flex_reward
+            + feet_up_reward
+            - control_cost
+        )
 
         if self.data.qpos[0] >= self._target_distance:
             health_reward = 0
             forward_reward = 0
             control_cost = 0
-            # pos_deviation_cost = 0
-            # lateral_velocity_cost = 0
+            knee_flex_reward = 0
+            feet_up_reward = 0
             reward = self._reach_target_reward
 
         reward_info = {
-            information["rwd_health"]: health_reward,
-            information["rwd_forward"]: forward_reward,
-            information["pnl_control"]: control_cost,
-            # information["rewards"]["pos_deviation"]: pos_deviation_cost,
-            # information["rewards"]["lateral_velocity"]: lateral_velocity_cost,
+            information["r_health"]: health_reward,
+            information["r_forward"]: forward_reward,
+            information["p_control"]: control_cost,
+            information["r_knee_flex"]: knee_flex_reward,
+            information["r_feet_up"]: feet_up_reward,
         }
 
         return reward, reward_info
@@ -214,27 +213,13 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         reward, reward_info = self._get_rew(velocity, position_before, position_after)
 
         info = {
-            # information["_pos_body_x"]: self.data.qpos[0],
-            # information["_pos_body_y"]: self.data.qpos[1],
-            # information["_pos_body_z"]: self.data.qpos[2],
-            information["_pos_mc_x"]: position_after[0],
-            information["_pos_mc_y"]: position_after[1],
-            information["_pos_mc_z"]: position_after[2],
-            # information["_vel_body_x"]: self.data.qvel[0],
-            # information["_vel_body_y"]: self.data.qvel[1],
-            # information["_vel_body_z"]: self.data.qvel[2],
-            information["_vel_mc_x"]: velocity[0],
-            information["_vel_mc_y"]: velocity[1],
-            information["_vel_mc_z"]: velocity[2],
-            information["orientation"]: self.data.qpos[3],
+            information["_pos_x"]: position_after[0],
+            information["_pos_y"]: position_after[1],
+            information["_pos_z"]: position_after[2],
+            information["_vel_x"]: velocity[0],
+            information["_vel_y"]: velocity[1],
+            information["_vel_z"]: velocity[2],
             information["distance"]: distance_from_origin,
-            # "x_position": position_after[0],
-            # "y_position": position_after[1],
-            # "z_position": self.data.qpos[2],
-            # "orientation": self.data.qpos[3],
-            # "x_velocity": velocity[0],
-            # "y_velocity": velocity[1],
-            # "distance_from_origin": distance_from_origin,
             **reward_info,
         }
 

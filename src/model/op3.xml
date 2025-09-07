@@ -199,7 +199,7 @@
                   <joint name="l_ank_roll" axis="1 0 0" limited="true" range="-0.40 0.40"/>
                   <geom mesh="ll6" class="visual"/>
                   <!-- <geom mesh="ll6c" class="collision" /> -->
-                  <geom class="foot" pos="0.024 0.013 -0.0265" size="0.0635 0.028 0.004"/>
+                  <geom name="l_foot" class="foot" pos="0.024 0.013 -0.0265" size="0.0635 0.028 0.004"/>
                   <!-- <geom class="foot" pos="0.024 0.0125 -0.0265" size="0.057 0.039 0.004"/> -->
                   <!-- <site name="l_foot"/> -->
                 </body>
@@ -248,7 +248,7 @@
                   <joint name="r_ank_roll" axis="1 0 0" limited="true" range="-0.40 0.40"/>
                   <geom mesh="rl6" class="visual"/>
                   <!-- <geom mesh="rl6c" class="collision" /> -->
-                  <geom class="foot" pos="0.024 -0.013 -0.0265" size="0.0635 0.028 0.004"/>
+                  <geom name="r_foot" class="foot" pos="0.024 -0.013 -0.0265" size="0.0635 0.028 0.004"/>
                   <!-- <site name="r_foot"/> -->
                   <!-- <geom class="foot" pos="0.024 -0.0125 -0.0265" size="0.057 0.039 0.004"/> -->
                 </body>
