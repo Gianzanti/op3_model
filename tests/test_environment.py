@@ -223,17 +223,17 @@ class DarwinOp3_TestEnv(unittest.TestCase):
     def make_env(self):
         import gymnasium as gym
         env = gym.make(exported_env)
-        env = gym.wrappers.TimeLimit(env, 5)  # new time limit
+        env = gym.wrappers.TimeLimit(env, 100)  # new time limit
         return env
 
     def test_time_limit(self):
-        from stable_baselines3 import PPO
+        from stable_baselines3 import A2C
         from stable_baselines3.common.env_util import make_vec_env
         from stable_baselines3.ppo.policies import MlpPolicy
         import gymnasium as gym
 
         env = make_vec_env(self.make_env, n_envs=4)
-        model = PPO(MlpPolicy, env, verbose=1, device="cpu", n_steps=2048, batch_size=64, n_epochs=10)
+        model = A2C(MlpPolicy, env, verbose=1, device="cpu")
 
         model.learn(total_timesteps=10000, callback=TensorboardCallback())
      

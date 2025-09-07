@@ -1,6 +1,6 @@
 [project]
 name = "op3"
-version = "0.1.7"
+version = "0.1.8"
 description = "Darwin OP3 Gym MuJoCo Environment"
 readme = "README.md"
 requires-python = ">=3.10"

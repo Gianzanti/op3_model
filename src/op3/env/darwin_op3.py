@@ -28,6 +28,7 @@ information = {
     "r_forward": "rf",
     "r_knee_flex": "rkf",
     "r_feet_up": "rfu",
+    "r_parallel": "rpr",
     "p_control": "cc",
 }
 
@@ -53,6 +54,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         reach_target_reward: float = 100.0,
         knee_flex_reward: float = 1e-3,
         feet_up_reward: float = 1e-3,
+        parallel_reward: float = 1,
         motor_max_torque: float = 3.0,
         reset_noise_scale: float = 1e-2,
         **kwargs,
@@ -69,6 +71,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             reach_target_reward,
             knee_flex_reward,
             feet_up_reward,
+            parallel_reward,
             motor_max_torque,
             reset_noise_scale,
             **kwargs,
@@ -86,6 +89,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         self._reach_target_reward: float = reach_target_reward
         self._knee_flex_reward: float = knee_flex_reward
         self._feet_up_reward: float = feet_up_reward
+        self._parallel_reward: float = parallel_reward
         self._motor_max_torque = motor_max_torque
         self._reset_noise_scale: float = reset_noise_scale
 
@@ -159,12 +163,14 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         feet_up_reward = self._feet_up_reward * (
             self.data.geom_xpos[32][2] + self.data.geom_xpos[44][2]
         )
+        parallel_reward = self._parallel_reward * self.check_parallel_reward()
 
         reward = (
             health_reward
             + forward_reward
             + knee_flex_reward
             + feet_up_reward
+            + parallel_reward
             - control_cost
         )
 
@@ -174,6 +180,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             control_cost = 0
             knee_flex_reward = 0
             feet_up_reward = 0
+            parallel_reward = 0
             reward = self._reach_target_reward
 
         reward_info = {
@@ -182,6 +189,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             information["p_control"]: control_cost,
             information["r_knee_flex"]: knee_flex_reward,
             information["r_feet_up"]: feet_up_reward,
+            information["r_parallel"]: parallel_reward,
         }
 
         return reward, reward_info
@@ -228,3 +236,69 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         # truncation=False as the time limit is handled by the `TimeLimit`
         # wrapper added during `make`
         return observation, reward, self.termination(position_after[2]), False, info
+
+    def _check_contact(self, foot):
+        """
+        Checks if two bodies are in contact.
+
+        Args:
+            body_name1 (str): The name of the first body.
+            body_name2 (str): The name of the second body.
+
+        Returns:
+            bool: True if the bodies are in contact, False otherwise.
+        """
+        if foot == "l_foot":
+            geom_foot = 32
+        elif foot == "r_foot":
+            geom_foot = 44
+
+        # Iterate through all contacts in the current simulation step.
+        for i in range(self.data.ncon):
+            contact = self.data.contact[i]
+
+            if (contact.geom1 == 0 and contact.geom2 == geom_foot) or (
+                contact.geom1 == geom_foot and contact.geom2 == 0
+            ):
+                # Contact detected between geom_id_A and geom_id_B
+                # print(f"Contact detected between world and {foot}", contact.pos)
+                return True
+
+        # If the loop completes, no contact was found.
+        return False
+
+    def check_parallel_reward(self):
+        """
+        Calculate a reward based on the orientation of the robot's feet
+        when they are in contact with the ground.
+
+        The reward is higher when the feet are more parallel to the ground
+        (i.e., their local Z-axes align with the global Z-axis).
+
+        Returns:
+            float: The calculated parallel reward.
+        """
+
+        # 1. Get the rotation of the foot bodies
+        left_foot_rot = self.data.geom("l_foot").xmat.reshape(3, 3)
+        right_foot_rot = self.data.geom("r_foot").xmat.reshape(3, 3)
+
+        # 2. Extract their local Z-axes (the "up" vector for each foot)
+        left_foot_z_axis = left_foot_rot[:, 2]
+        right_foot_z_axis = right_foot_rot[:, 2]
+
+        # 3. Check for contact with the worldbody (the ground)
+        # Note: 'worldbody' is the default name for the root body in MuJoCo.
+        is_left_foot_on_ground = self._check_contact("l_foot")
+        # print("Left foot on ground:", is_left_foot_on_ground)
+        is_right_foot_on_ground = self._check_contact("r_foot")
+        # print("Right foot on ground:", is_right_foot_on_ground)
+
+        # 4. Calculate the parallel reward only for the foot that is on the ground
+        # The dot product with (0,0,1) is just the z-component of the vector.
+        left_parallel_reward = left_foot_z_axis[2] if is_left_foot_on_ground else 0
+        right_parallel_reward = right_foot_z_axis[2] if is_right_foot_on_ground else 0
+
+        parallel_reward = left_parallel_reward + right_parallel_reward
+        # print(f"Parallel Reward: {parallel_reward}")
+        return parallel_reward
