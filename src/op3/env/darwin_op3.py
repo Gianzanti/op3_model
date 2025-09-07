@@ -283,15 +283,11 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
 
         # 1. Get the rotation of the foot bodies
         left_foot_rot = self.data.geom("l_foot").xmat.reshape(3, 3)
-        print("Left foot rotation matrix:\n", left_foot_rot)
         right_foot_rot = self.data.geom("r_foot").xmat.reshape(3, 3)
-        print("Right foot rotation matrix:\n", right_foot_rot)
 
         # 2. Extract their local Z-axes (the "up" vector for each foot)
         left_foot_z_axis = left_foot_rot[:, 2]
-        print("Left foot Z-axis:", left_foot_z_axis)
         right_foot_z_axis = right_foot_rot[:, 2]
-        print("Right foot Z-axis:", right_foot_z_axis)
 
         # 3. Calculate the dot product with the global Z-axis (0, 0, 1)
         # Measure how aligned the foot's Z-axis is with the global Z-axis
@@ -299,9 +295,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         # The dot product with (0,0,1) is just the z-component of the vector.
         # So we just get that directly.
         left_alignment = left_foot_z_axis[2]
-        print("Left alignment:", left_alignment)
         right_alignment = right_foot_z_axis[2]
-        print("Right alignment:", right_alignment)
 
         # 4. Check for contact with the world (the ground)
         # Note: 'world' is the default name for the root body in MuJoCo.
@@ -315,10 +309,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         # The penalty is higher when the foot is less aligned (i.e., less parallel)
         # We use the alignment directly as the reward, so higher is better (more parallel)
         left_parallel_penalty = (1 - left_alignment) if is_left_foot_on_ground else 0
-        print("Left parallel penalty:", left_parallel_penalty)
         right_parallel_penalty = (1 - right_alignment) if is_right_foot_on_ground else 0
-        print("Right parallel penalty:", right_parallel_penalty)
 
         not_parallel_penalty = left_parallel_penalty + right_parallel_penalty
-        print(f"Not Parallel Penalty: {not_parallel_penalty}")
         return not_parallel_penalty

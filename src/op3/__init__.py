@@ -14,4 +14,4 @@ if env_id is None:
     )
     print(f"Registered environment {exported_env}")
 
-print(f"DarwinOp3 Env version: {version('op3')}")
+print(f"{exported_env} Env version: {version('op3')}")
