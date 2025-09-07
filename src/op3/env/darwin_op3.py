@@ -54,7 +54,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         reach_target_reward: float = 100.0,
         knee_flex_reward: float = 1e-3,
         feet_up_reward: float = 1e-3,
-        parallel_reward: float = 1,
+        parallel_reward: float = 0.5,
         motor_max_torque: float = 3.0,
         reset_noise_scale: float = 1e-2,
         **kwargs,
