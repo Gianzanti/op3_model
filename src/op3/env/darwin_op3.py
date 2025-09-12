@@ -9,11 +9,15 @@ from gymnasium.utils import EzPickle
 DEFAULT_CAMERA_CONFIG = {"trackbodyid": 0}
 
 
-def mass_center(model, data):
+def mass_center_position(model, data):
     mass = np.expand_dims(model.body_mass, axis=1)
     xpos = data.xipos
     com = np.sum(mass * xpos, axis=0) / np.sum(mass)
     return com[0:3].copy()
+
+
+def mass_center_velocity(before, after, delta_time):
+    return (after - before) / delta_time
 
 
 information = {
@@ -23,12 +27,16 @@ information = {
     "_vel_x": "vx",
     "_vel_y": "vy",
     "_vel_z": "vz",
-    "distance": "dfo",
+    "info_dst_org": "dfo",
+    "info_knee_angvel": "ikav",
+    "info_feet_height": "ifh",
+    "info_feet_misalignment": "ifm",
+    "info_control": "ic",
     "r_health": "rh",
     "r_forward": "rf",
     "r_knee_flex": "rkf",
     "r_feet_up": "rfu",
-    "p_not_parallel": "pnp",
+    "p_feet_misalignment": "pfm",
     "p_control": "pc",
 }
 
@@ -47,14 +55,14 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         frame_skip: int = 5,
         default_camera_config: Dict[str, Union[float, int]] = DEFAULT_CAMERA_CONFIG,
         healthy_z_range: Tuple[float, float] = (0.270, 0.300),  # expected z: 0.285
-        keep_alive_reward: float = 1.0,
-        ctrl_cost_weight: float = 1e-3,
+        keep_alive_weight: float = 1.0,
+        control_weight: float = 1e-3,
         target_distance: float = 100.0,
-        forward_velocity_weight: float = 3.0,
+        velocity_weight: float = 3.0,
         reach_target_reward: float = 100.0,
-        knee_flex_reward: float = 1e-3,
-        feet_up_reward: float = 1e-3,
-        not_parallel_penalty: float = 0.05,
+        knee_flex_weight: float = 1e-3,
+        feet_up_weight: float = 1e-3,
+        feet_misalign_weight: float = 0.05,
         motor_max_torque: float = 3.0,
         reset_noise_scale: float = 1e-2,
         **kwargs,
@@ -63,15 +71,15 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             self,
             frame_skip,
             default_camera_config,
-            keep_alive_reward,
+            keep_alive_weight,
             healthy_z_range,
-            ctrl_cost_weight,
-            forward_velocity_weight,
+            control_weight,
+            velocity_weight,
             target_distance,
             reach_target_reward,
-            knee_flex_reward,
-            feet_up_reward,
-            not_parallel_penalty,
+            knee_flex_weight,
+            feet_up_weight,
+            feet_misalign_weight,
             motor_max_torque,
             reset_noise_scale,
             **kwargs,
@@ -81,15 +89,15 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             os.path.dirname(__file__), "..", "..", "model", "scene.xml"
         )
 
-        self._keep_alive_reward: float = keep_alive_reward
+        self._keep_alive_weight: float = keep_alive_weight
         self._healthy_z_range: Tuple[float, float] = healthy_z_range
-        self._ctrl_cost_weight: float = ctrl_cost_weight
-        self._fw_vel_rew_weight: float = forward_velocity_weight
+        self._control_weight: float = control_weight
+        self._velocity_weight: float = velocity_weight
         self._target_distance: float = target_distance
         self._reach_target_reward: float = reach_target_reward
-        self._knee_flex_reward: float = knee_flex_reward
-        self._feet_up_reward: float = feet_up_reward
-        self._not_parallel_penalty: float = not_parallel_penalty
+        self._knee_flex_weight: float = knee_flex_weight
+        self._feet_up_weight: float = feet_up_weight
+        self._feet_misalignment_weight: float = feet_misalign_weight
         self._motor_max_torque = motor_max_torque
         self._reset_noise_scale: float = reset_noise_scale
 
@@ -147,51 +155,63 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
 
         return self._get_obs()
 
-    # @property
     def is_healthy(self, z_pos) -> bool:
         min_z, max_z = self._healthy_z_range
         return min_z < z_pos < max_z
 
+    def control_effort(self):
+        return np.sum(np.square(self.data.ctrl))
+
+    def knees_angular_velocity(self):
+        return abs(self.data.qvel[10]) + abs(self.data.qvel[16])
+
+    def feet_height(self):
+        return self.data.geom_xpos[32][2] + self.data.geom_xpos[44][2]
+
     def _get_rew(self, velocity, position_before, position_after):
-        [x_velocity, y_velocity, z_velocity] = velocity
-        health_reward = self._keep_alive_reward * self.is_healthy(position_after[2])
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(self.data.ctrl))
-        forward_reward = self._fw_vel_rew_weight * x_velocity
-        knee_flex_reward = self._knee_flex_reward * (
-            abs(self.data.qvel[10]) + abs(self.data.qvel[16])
-        )
-        feet_up_reward = self._feet_up_reward * (
-            self.data.geom_xpos[32][2] + self.data.geom_xpos[44][2]
-        )
-        not_parallel_penalty = (
-            self._not_parallel_penalty * self.check_not_parallel_penalty()
-        )
+        # [x_velocity, y_velocity, z_velocity] = velocity
+        health_reward = self._keep_alive_weight * self.is_healthy(position_after[2])
+        forward_reward = self._velocity_weight * velocity[0]
+        info_knee_angvel = self.knees_angular_velocity()
+        info_feet_height = self.feet_height()
+        info_control = self.control_effort()
+        info_feet_misalign = self.feets_ground_misalignment()
+
+        knee_flex_reward = self._knee_flex_weight * info_knee_angvel
+        feet_up_reward = self._feet_up_weight * info_feet_height
+        control_penalty = self._control_weight * info_control
+        feet_misalign_penalty = self._feet_misalignment_weight * info_feet_misalign
 
         reward = (
             health_reward
             + forward_reward
             + knee_flex_reward
             + feet_up_reward
-            - not_parallel_penalty
-            - control_cost
+            - feet_misalign_penalty
+            - control_penalty
         )
 
         if self.data.qpos[0] >= self._target_distance:
             health_reward = 0
             forward_reward = 0
-            control_cost = 0
             knee_flex_reward = 0
             feet_up_reward = 0
-            not_parallel_penalty = 0
+            control_penalty = 0
+            feet_misalign_penalty = 0
             reward = self._reach_target_reward
 
         reward_info = {
+            information["info_dst_org"]: self.distance_from_origin(),
+            information["info_knee_angvel"]: info_knee_angvel,
+            information["info_feet_height"]: info_feet_height,
+            information["info_control"]: info_control,
+            information["info_feet_misalignment"]: info_feet_misalign,
             information["r_health"]: health_reward,
             information["r_forward"]: forward_reward,
-            information["p_control"]: control_cost,
             information["r_knee_flex"]: knee_flex_reward,
             information["r_feet_up"]: feet_up_reward,
-            information["p_not_parallel"]: not_parallel_penalty,
+            information["p_control"]: control_penalty,
+            information["p_feet_misalignment"]: feet_misalign_penalty,
         }
 
         return reward, reward_info
@@ -205,31 +225,29 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
 
         return False
 
+    def distance_from_origin(self):
+        return np.linalg.norm(self.data.qpos[0:2], ord=2)
+
     def step(self, normalized_action):
-        # print("step")
         # get the current position of the robot, before action
-        # position_before = mass_center(self.model, self.data)
-        position_before = mass_center(self.model, self.data)
+        mc_before = mass_center_position(self.model, self.data)
 
         # denormalize the action to the range of the motors
         action = normalized_action * self._motor_max_torque
         self.do_simulation(action, self.frame_skip)
-        position_after = mass_center(self.model, self.data)
+        mc_after = mass_center_position(self.model, self.data)
 
-        velocity = (position_after - position_before) / self.dt
-        distance_from_origin = np.linalg.norm(self.data.qpos[0:2], ord=2)
-
+        velocity = mass_center_velocity(mc_before, mc_after, self.dt * self.frame_skip)
         observation = self._get_obs()
-        reward, reward_info = self._get_rew(velocity, position_before, position_after)
+        reward, reward_info = self._get_rew(velocity, mc_before, mc_after)
 
         info = {
-            information["_pos_x"]: position_after[0],
-            information["_pos_y"]: position_after[1],
-            information["_pos_z"]: position_after[2],
+            information["_pos_x"]: mc_after[0],
+            information["_pos_y"]: mc_after[1],
+            information["_pos_z"]: mc_after[2],
             information["_vel_x"]: velocity[0],
             information["_vel_y"]: velocity[1],
             information["_vel_z"]: velocity[2],
-            information["distance"]: distance_from_origin,
             **reward_info,
         }
 
@@ -237,7 +255,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             self.render()
         # truncation=False as the time limit is handled by the `TimeLimit`
         # wrapper added during `make`
-        return observation, reward, self.termination(position_after[2]), False, info
+        return observation, reward, self.termination(mc_after[2]), False, info
 
     def _check_contact(self, foot):
         """
@@ -269,7 +287,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         # If the loop completes, no contact was found.
         return False
 
-    def check_not_parallel_penalty(self):
+    def feets_ground_misalignment(self):
         """
         Calculate a penalty based on the orientation of the robot's feet
         when they are in contact with the ground.
@@ -300,16 +318,13 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         # 4. Check for contact with the world (the ground)
         # Note: 'world' is the default name for the root body in MuJoCo.
         is_left_foot_on_ground = self._check_contact("l_foot")
-        # print("Left foot on ground:", is_left_foot_on_ground)
         is_right_foot_on_ground = self._check_contact("r_foot")
-        # print("Right foot on ground:", is_right_foot_on_ground)
 
         # 4. Calculate the penalty based on alignment and contact
         # Only apply the penalty if the foot is in contact with the ground
         # The penalty is higher when the foot is less aligned (i.e., less parallel)
         # We use the alignment directly as the reward, so higher is better (more parallel)
-        left_parallel_penalty = (1 - left_alignment) if is_left_foot_on_ground else 0
-        right_parallel_penalty = (1 - right_alignment) if is_right_foot_on_ground else 0
+        left_misalignment = (1 - left_alignment) if is_left_foot_on_ground else 0
+        right_misalignment = (1 - right_alignment) if is_right_foot_on_ground else 0
 
-        not_parallel_penalty = left_parallel_penalty + right_parallel_penalty
-        return not_parallel_penalty
+        return left_misalignment + right_misalignment
