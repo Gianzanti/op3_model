@@ -199,8 +199,9 @@ class DarwinOp3_TestEnv(unittest.TestCase):
         model = PPO(MlpPolicy, env, verbose=1, device="cpu", n_steps=2048, batch_size=64, n_epochs=10)
         # mean_reward_before_train = evaluate(model, num_episodes=100)
 
-        model.learn(total_timesteps=10000, callback=TensorboardCallback())
+        model.learn(total_timesteps=50000, callback=TensorboardCallback())
         # mean_reward_after_train = evaluate(model, num_episodes=100)
+        evaluate(model, num_episodes=1000)
 
         # assert mean_reward_after_train > mean_reward_before_train, "Callback failed to improve the mean reward"
 

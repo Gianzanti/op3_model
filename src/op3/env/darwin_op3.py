@@ -32,6 +32,7 @@ information = {
     "info_feet_height": "ifh",
     "info_feet_misalignment": "ifm",
     "info_control": "ic",
+    "info_timestep": "it",
     "r_health": "rh",
     "r_forward": "rf",
     "r_knee_flex": "rkf",
@@ -65,6 +66,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         feet_misalign_weight: float = 0.05,
         motor_max_torque: float = 3.0,
         reset_noise_scale: float = 1e-2,
+        max_timestep: int = 5000,
         **kwargs,
     ):
         EzPickle.__init__(
@@ -82,6 +84,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             feet_misalign_weight,
             motor_max_torque,
             reset_noise_scale,
+            max_timestep,
             **kwargs,
         )
 
@@ -100,6 +103,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         self._feet_misalignment_weight: float = feet_misalign_weight
         self._motor_max_torque = motor_max_torque
         self._reset_noise_scale: float = reset_noise_scale
+        self._max_timestep: int = max_timestep
 
         MujocoEnv.__init__(
             self,
@@ -129,6 +133,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         self.observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_size,), dtype=np.float64
         )
+        self.current_step = 0
 
     def _get_obs(self):
         position = self.data.qpos[2:].flatten()
@@ -152,6 +157,8 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         )
 
         self.set_state(qpos, qvel)
+        # print("Reseting timestep to 0, it was: ", self.current_step)
+        self.current_step = 0
 
         return self._get_obs()
 
@@ -191,7 +198,9 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             - control_penalty
         )
 
-        if self.data.qpos[0] >= self._target_distance:
+        if (self.data.qpos[0] >= self._target_distance) or (
+            self.current_step >= self._max_timestep
+        ):
             health_reward = 0
             forward_reward = 0
             knee_flex_reward = 0
@@ -206,6 +215,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             information["info_feet_height"]: info_feet_height,
             information["info_control"]: info_control,
             information["info_feet_misalignment"]: info_feet_misalign,
+            information["info_timestep"]: self.current_step,
             information["r_health"]: health_reward,
             information["r_forward"]: forward_reward,
             information["r_knee_flex"]: knee_flex_reward,
@@ -229,6 +239,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
         return np.linalg.norm(self.data.qpos[0:2], ord=2)
 
     def step(self, normalized_action):
+        self.current_step += 1
         # get the current position of the robot, before action
         mc_before = mass_center_position(self.model, self.data)
 
@@ -255,6 +266,9 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             self.render()
         # truncation=False as the time limit is handled by the `TimeLimit`
         # wrapper added during `make`
+        # if self.current_step >= self._max_timestep:
+        #     return observation, reward, False, True, info
+
         return observation, reward, self.termination(mc_after[2]), False, info
 
     def _check_contact(self, foot):

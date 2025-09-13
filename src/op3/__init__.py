@@ -11,6 +11,7 @@ if env_id is None:
         id=exported_env,
         entry_point="op3.env:DarwinOp3Env",
         nondeterministic=True,
+        # max_episode_steps=100,
     )
     print(f"Registered environment {exported_env}")
 
