@@ -194,9 +194,36 @@ class DarwinOp3_TestEnv(unittest.TestCase):
         from stable_baselines3 import PPO
         from stable_baselines3.ppo.policies import MlpPolicy
 
+
+
+        # n_timestep = 10_000_000
+        # save_freq = min(200_000, int(n_timestep / 10))
+        # eval_freq = min(400_000, int(n_timestep / 10))
+        # max_episode_steps = 5500
+        # wrapper = [{"gymnasium.wrappers.TimeLimit": {"max_episode_steps": max_episode_steps}}]
+        # n_envs = 20
+        # n_eval_envs = 3
+        # eval_episodes = 30
+
+        # # weights
+        # keep_alive_weight = 1.0
+        # control_weight = 0.00 #1e-3
+        # target_distance = 3.0
+        # velocity_weight = 3.00 #3.0
+        # reach_target_reward = 100.0
+        # knee_flex_weight = 0.00 #1e-3
+        # feet_up_weight = 0.00 #1e-3
+        # feet_misalign_weight = 0.00 #0.5
+        # max_timestep = 5000
+
+
+
         # env = gym.make(exported_env, render_mode="rgb_array", width=1920, height=1080)
-        env = gym.make(exported_env)
-        model = PPO(MlpPolicy, env, verbose=1, device="cpu", n_steps=2048, batch_size=64, n_epochs=10)
+        env = gym.make(exported_env, max_episode_steps=100, keep_alive_weight=1.0, control_weight=0.00,
+                       target_distance=3.0, velocity_weight=0.00, reach_target_reward=2.0,
+                       knee_flex_weight=0.00, feet_up_weight=0.00, feet_misalign_weight=0.00,
+                       max_timestep=100)
+        model = PPO(MlpPolicy, env, verbose=1, device="cpu")
         # mean_reward_before_train = evaluate(model, num_episodes=100)
 
         model.learn(total_timesteps=50000, callback=TensorboardCallback())

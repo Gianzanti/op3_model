@@ -198,9 +198,7 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             - control_penalty
         )
 
-        if (self.data.qpos[0] >= self._target_distance) or (
-            self.current_step >= self._max_timestep
-        ):
+        if self.data.qpos[0] >= self._target_distance:
             health_reward = 0
             forward_reward = 0
             knee_flex_reward = 0
@@ -208,6 +206,15 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             control_penalty = 0
             feet_misalign_penalty = 0
             reward = self._reach_target_reward
+
+        if self.current_step >= self._max_timestep:
+            health_reward = 0
+            forward_reward = 0
+            knee_flex_reward = 0
+            feet_up_reward = 0
+            control_penalty = 0
+            feet_misalign_penalty = 0
+            reward = 2.00
 
         reward_info = {
             information["info_dst_org"]: self.distance_from_origin(),
@@ -231,6 +238,10 @@ class DarwinOp3Env(MujocoEnv, EzPickle):
             return True
 
         if self.data.qpos[0] >= self._target_distance:
+            return True
+
+        if self.current_step >= self._max_timestep:
+            # print("Max timestep reached in termination check", self.current_step)
             return True
 
         return False
